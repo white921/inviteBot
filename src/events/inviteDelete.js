@@ -5,6 +5,6 @@ module.exports = {
   name: Events.InviteDelete,
   async execute(invite) {
     if (!invite.guild) return;
-    inviteCache.deleteCached(invite.guild.id, invite.code);
+    inviteCache.noteDeletedInvite(invite.guild.id, invite.code);
   },
 };

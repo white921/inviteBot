@@ -1,16 +1,34 @@
 const { Events } = require('discord.js');
 const db = require('../db');
 const inviteCache = require('../inviteCache');
+const { INVITE_PANEL_CHANNEL_ID } = require('../constants');
+
+const issueQueues = new Map();
+
+function enqueueIssue(guildId, userId, task) {
+  const key = `${guildId}:${userId}`;
+  const previous = issueQueues.get(key) ?? Promise.resolve();
+  const current = previous.catch(() => {}).then(task);
+  issueQueues.set(key, current);
+  return current.finally(() => {
+    if (issueQueues.get(key) === current) issueQueues.delete(key);
+  });
+}
 
 async function handleIssueInvite(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-
   const guild = interaction.guild;
   const userId = interaction.user.id;
-  const targetChannel = interaction.channel;
+  const targetChannel = INVITE_PANEL_CHANNEL_ID
+    ? await guild.channels.fetch(INVITE_PANEL_CHANNEL_ID).catch(() => null)
+    : interaction.channel;
+
+  if (!targetChannel || !targetChannel.isTextBased()) {
+    await interaction.editReply('招待リンク発行チャンネルが見つかりません。設定を確認してください。');
+    return;
+  }
 
   // Check for existing owner invite
-  const existingCode = await db.getOwnerInvite(guild.id, userId);
+  const existingCode = await db.getActiveOwnerInvite(guild.id, userId);
   if (existingCode) {
     try {
       const invites = await guild.invites.fetch();
@@ -22,15 +40,19 @@ async function handleIssueInvite(interaction) {
       }
     } catch (err) {
       console.error('[interactionCreate] Failed to fetch existing invites:', err.message);
+      await interaction.editReply('既存の招待リンクを確認できませんでした。しばらくしてから再度お試しください。');
+      return;
     }
-    // The recorded invite no longer exists — fall through to create a new one.
+    // The recorded invite no longer exists — retire its DB record before issuing
+    // a replacement, so one owner never has two active panel links.
+    await db.markActiveInviteRevoked(guild.id, existingCode);
   }
 
   let invite;
   try {
     invite = await targetChannel.createInvite({
       maxAge: 0,
-      maxUses: 0,
+      maxUses: 1,
       unique: true,
       reason: `Issued via panel for user ${interaction.user.tag} (${userId})`,
     });
@@ -58,8 +80,9 @@ module.exports = {
       }
 
       if (interaction.isButton()) {
-        if (interaction.customId === 'issue_invite') {
-          await handleIssueInvite(interaction);
+      if (interaction.customId === 'issue_invite') {
+          await interaction.deferReply({ ephemeral: true });
+          await enqueueIssue(interaction.guildId, interaction.user.id, () => handleIssueInvite(interaction));
         }
       }
     } catch (err) {

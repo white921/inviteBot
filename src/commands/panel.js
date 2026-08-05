@@ -6,6 +6,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require('discord.js');
+const { INVITE_PANEL_CHANNEL_ID } = require('../constants');
 
 const data = new SlashCommandBuilder()
   .setName('panel')
@@ -14,9 +15,22 @@ const data = new SlashCommandBuilder()
   .setDMPermission(false);
 
 async function execute(interaction) {
+  if (INVITE_PANEL_CHANNEL_ID && interaction.channelId !== INVITE_PANEL_CHANNEL_ID) {
+    await interaction.reply({
+      content: `<#${INVITE_PANEL_CHANNEL_ID}> でこのコマンドを実行してください。`,
+      ephemeral: true,
+    });
+    return;
+  }
+
   const embed = new EmbedBuilder()
     .setTitle('📨 招待リンク発行パネル')
-    .setDescription('下のボタンを押すと、あなた専用の招待リンクを発行します。\nそのリンクから入ってきたメンバーは、あなたの招待としてカウントされます。')
+    .setDescription([
+      'リンク発行ボタンを押すと、招待リンクを発行します。',
+      '',
+      '1人の招待につき1つのリンクが必要となるため、複数人を招待する際は、',
+      'リンクを送信するたびに発行し直していただくようお願い申し上げます。',
+    ].join('\n'))
     .setColor(0x5865f2);
 
   const row = new ActionRowBuilder().addComponents(
